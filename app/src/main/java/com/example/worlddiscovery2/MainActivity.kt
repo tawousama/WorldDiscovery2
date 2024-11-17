@@ -1,5 +1,6 @@
 package com.example.worlddiscovery2
 
+import android.content.res.Configuration
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.os.Bundle
@@ -43,14 +44,22 @@ import org.json.JSONArray
 import java.io.IOException
 import java.net.URL
 import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.border
-import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.size
-import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.unit.IntSize
+import androidx.navigation.NavType
+import androidx.navigation.compose.NavHost
+import androidx.navigation.compose.composable
+import androidx.navigation.compose.rememberNavController
+import androidx.navigation.navArgument
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -58,23 +67,80 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         setContent {
             WorldDiscovery2Theme {
-                val url = "http://localhost:8081/countries.json"
                 Surface {
-                    ActiveDrawer(
-                        color = Color.Blue, modifier = Modifier
-                            .size(500.dp)
-                            .padding(20.dp)
-                            .border(color = Color.Red, width = 1.dp)
-                    )
-                    //CountryListScreen(url)
+                    val url = "http://localhost:8081/countries.json"
+                    NavigationComponent(url = url)
                 }
+            }
+        }
+    }
+}
+@Composable
+fun FlagAndDrawingScreen(country: Country) {
+    // Variable d'état pour la couleur sélectionnée
+    var selectedColor by remember { mutableStateOf(Color.Black) }
+    var flagImageBitmap by remember { mutableStateOf<ImageBitmap?>(null) }
+
+    // Charger le drapeau
+    LaunchedEffect(country.code) {
+        val flagBitmap = downloadFlagImage(country.code) // Télécharger le drapeau
+        flagImageBitmap = flagBitmap?.asImageBitmap() // Convertir en ImageBitmap
+    }
+
+    if (flagImageBitmap == null) {
+        // Affiche un indicateur de chargement tant que l'image n'est pas prête
+        CircularProgressIndicator(modifier = Modifier.fillMaxSize())
+    } else {
+        Column(modifier = Modifier.fillMaxSize()) {
+            // Palette de couleurs
+            Box(modifier = Modifier.weight(1f).padding(16.dp)) {
+                Palette(
+                    image = flagImageBitmap!!,
+                    modifier = Modifier.fillMaxSize(),
+                    onSelectedColor = { color ->
+                        selectedColor = color // Mettre à jour la couleur sélectionnée
+                    }
+                )
+            }
+
+            // Zone de dessin
+            Box(modifier = Modifier.weight(1f).padding(16.dp)) {
+                ActiveDrawer(
+                    color = selectedColor, // Utilise la couleur sélectionnée pour dessiner
+                    modifier = Modifier.fillMaxSize()
+                )
             }
         }
     }
 }
 
 @Composable
-fun CountryListScreen(url: String) {
+fun NavigationComponent(url: String) {
+    val navController = rememberNavController()
+
+    NavHost(navController = navController, startDestination = "country_list") {
+        composable("country_list") {
+            CountryListScreen(url) { country ->
+                navController.navigate("flag_and_drawing/${country.name}/${country.code}")
+            }
+        }
+        composable(
+            route = "flag_and_drawing/{name}/{code}",
+            arguments = listOf(
+                navArgument("name") { type = NavType.StringType },
+                navArgument("code") { type = NavType.StringType }
+            )
+        ) { backStackEntry ->
+            val name = backStackEntry.arguments?.getString("name") ?: ""
+            val code = backStackEntry.arguments?.getString("code") ?: ""
+            val country = Country(name = name, code = code, latitude = 0f, longitude = 0f)
+            FlagAndDrawingScreen(country = country)
+        }
+    }
+}
+
+@Composable
+fun CountryListScreen(url: String, onCountryClick: (Country) -> Unit) {
     val coroutineScope = rememberCoroutineScope()
     var countries by remember { mutableStateOf<List<Country>>(emptyList()) }
     var isLoading by remember { mutableStateOf(true) }
@@ -99,13 +165,7 @@ fun CountryListScreen(url: String) {
     } else {
         LazyVerticalGrid(
             columns = GridCells.Adaptive(128.dp),
-            // content padding
-            contentPadding = PaddingValues(
-                start = 12.dp,
-                top = 16.dp,
-                end = 12.dp,
-                bottom = 16.dp
-            ),
+            contentPadding = PaddingValues(12.dp),
             content = {
                 items(countries.size) { index ->
                     val country = countries[index]
@@ -114,23 +174,24 @@ fun CountryListScreen(url: String) {
                             .padding(10.dp)
                             .background(color = Color(0xFFE7E0EC))
                             .fillMaxSize()
-                            .height(130.dp),
+                            .height(130.dp)
+                            .clickable { onCountryClick(country) },
                         elevation = CardDefaults.elevatedCardElevation(defaultElevation = 0.dp),
                     ) {
-                        FlagDisplayer(
-                            country,
-                            modifier = Modifier
-                                .align(alignment = Alignment.CenterHorizontally)
-                                .padding(10.dp)
-                        )
-                        Text(
-                            text = country.name,
-                            fontSize = 20.sp,
-                            textAlign = TextAlign.Center,
-                            modifier = Modifier
-                                .padding(14.dp)
-                                .align(alignment = Alignment.CenterHorizontally)
-                        )
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            FlagDisplayer(
+                                country = country,
+                                modifier = Modifier
+                                    .padding(10.dp)
+                                    .fillMaxWidth()
+                            )
+                            Text(
+                                text = country.name,
+                                fontSize = 20.sp,
+                                textAlign = TextAlign.Center,
+                                modifier = Modifier.padding(14.dp)
+                            )
+                        }
                     }
                 }
             }
@@ -215,118 +276,141 @@ suspend fun downloadFlagImage(countryCode: String): Bitmap? {
     }
 }
 
-@Preview(showBackground = true)
-@Composable
-fun DrawerPreview() {
-    // Création d'un sketch de test avec 2 chemins de dessin (un noir et un rouge)
-    val sketch = Sketch.createEmpty()
-        .plus(Color.Black)
-        .plus(Offset(100f, 100f))
-        .plus(Offset(200f, 200f))
-        .plus(Color.Red)
-        .plus(Offset(300f, 100f))
-        .plus(Offset(400f, 200f))
-
-    Drawer(sketch = sketch, modifier = Modifier.fillMaxSize())
-}
-@Composable
-fun ActiveDrawer(
-    color: Color,
-    modifier: Modifier = Modifier
-) {
-    var sketch by remember { mutableStateOf(Sketch.createEmpty()) }
-    var isFirstTouch by remember { mutableStateOf(true) }
-    var size by remember { mutableStateOf(IntSize.Zero) }
-    var currentPosition by remember { mutableStateOf(Offset(0f, 0f)) } // Pour stocker la position actuelle
-
-    // Crée un composant Box pour dessiner
-    Box(
-        modifier = modifier
-            .fillMaxSize()
-            .onSizeChanged {
-                size = it // On capture la taille du composant
-            }
-    ) {
-        // Drawer qui dessine le sketch
-        Drawer(sketch, modifier = Modifier.fillMaxSize())
-
-        // PointerCapturer pour détecter les gestes
-        PointerCapturer(
-            modifier = Modifier.fillMaxSize(),
-            onNewPointerPosition = { position, firstTouch ->
-                // Adapter les coordonnées pour les mettre dans le contexte du Canvas
-                val adjustedPosition = Offset(
-                    x = position.x.coerceIn(0f, size.width.toFloat()),  // Assurer que x est dans les bornes
-                    y = position.y.coerceIn(0f, size.height.toFloat())  // Assurer que y est dans les bornes
-                )
-                isFirstTouch = firstTouch
-                // Mettre à jour le sketch avec la nouvelle position
-                if (isFirstTouch) {
-                    sketch += color // On commence un nouveau tracé avec la couleur donnée
-                }
-                sketch += adjustedPosition // Ajouter le point au tracé
-
-                // Mettre à jour la position actuelle
-                currentPosition = adjustedPosition
-                // Mettre à jour l'état du premier contact
-            }
-        )
-
-        // Affichage de la position actuelle et de l'état du premier contact
-        Text(
-            text = "Position: ${currentPosition.x}, ${currentPosition.y}\nFirst Touch: $isFirstTouch",
-            modifier = Modifier.align(Alignment.TopStart).padding(16.dp)
-        )
-    }
-}
 
 @Composable
 fun Drawer(sketch: Sketch, modifier: Modifier = Modifier) {
     Canvas(modifier = modifier) {
-        // Dessiner les chemins de sketch
         sketch.paths.forEach { path ->
-            // Chaque path représente un tracé, dessine chaque segment
-            for (i in 1 until path.size) {
-                val start = path[i - 1]
-                val end = path[i]
+            for (i in 0 until path.size - 1) {
                 drawLine(
-                    start = start,
-                    end = end,
                     color = path.color,
+                    start = path[i],
+                    end = path[i + 1],
                     strokeWidth = 5f
                 )
             }
         }
     }
 }
-
 @Composable
-fun PointerCapturer(
-    modifier: Modifier = Modifier,
-    onNewPointerPosition: (Offset, Boolean) -> Unit
-) {
-    var isFirstTouch by remember { mutableStateOf(true) }
+fun PointerCapturer(modifier: Modifier = Modifier, onNewPointerPosition: (Offset, Boolean) -> Unit) {
+    var componentSize by remember { mutableStateOf(IntSize.Zero) }
 
     Box(
-        modifier = modifier.pointerInput(Unit) {
-            detectDragGestures { _, pan ->
-                // Position du geste, en pixels absolus
-                val position = Offset(pan.x, pan.y)
-
-                // Appeler la fonction onNewPointerPosition avec la position et si c'est le premier contact
-                onNewPointerPosition(position, isFirstTouch)
-
-                // Si c'est le premier contact, on commence un nouveau tracé
-                if (isFirstTouch) {
-                    isFirstTouch = false
+        modifier = modifier
+            .onSizeChanged { componentSize = it }
+            .pointerInput(Unit) {
+                awaitPointerEventScope {
+                    while (true) {
+                        val event = awaitPointerEvent()
+                        val position = event.changes.first().position
+                        val boundedOffset = Offset(
+                            position.x.coerceIn(0f, componentSize.width.toFloat()),
+                            position.y.coerceIn(0f, componentSize.height.toFloat())
+                        )
+                        if (event.changes.first().pressed) {
+                            // Continue current path
+                            onNewPointerPosition(boundedOffset, false)
+                        } else {
+                            // Start a new path
+                            onNewPointerPosition(boundedOffset, true)
+                        }
+                    }
                 }
             }
-        }
     )
 }
 
-@Preview
 @Composable
-fun ActiveDrawerPreview() {
-    ActiveDrawer(color = Color.Red)
+fun ActiveDrawer(color: Color, modifier: Modifier = Modifier) {
+    var sketch by remember { mutableStateOf(Sketch.createEmpty() + color) }
+
+    Box(modifier = modifier) {
+        Drawer(sketch = sketch, modifier = Modifier.fillMaxSize())
+        PointerCapturer(
+            modifier = Modifier.fillMaxSize(),
+            onNewPointerPosition = { offset, isNewPath ->
+                sketch = if (isNewPath) {
+                    sketch + color + offset
+                } else {
+                    sketch + offset
+                }
+            }
+        )
+    }
 }
+@Composable
+fun Palette(image: ImageBitmap, modifier: Modifier = Modifier, onSelectedColor: (Color) -> Unit) {
+    var componentSize by remember { mutableStateOf(IntSize.Zero) }
+
+    Box(
+        modifier = modifier
+            .onSizeChanged { componentSize = it }
+            .pointerInput(Unit) {
+                awaitPointerEventScope {
+                    while (true) {
+                        val event = awaitPointerEvent()
+                        val position = event.changes.firstOrNull()?.position ?: continue
+                        if (event.changes.first().pressed) {
+                            val scaledX = ((position.x / componentSize.width) * image.width).toInt()
+                            val scaledY = ((position.y / componentSize.height) * image.height).toInt()
+                            if (scaledX in 0 until image.width && scaledY in 0 until image.height) {
+                                val bitmap = image.asAndroidBitmap()
+                                val pixelColor = bitmap.getPixel(scaledX, scaledY)
+                                onSelectedColor(Color(pixelColor))
+                            }
+                        }
+                    }
+                }
+            }
+    ) {
+        Image(bitmap = image, contentDescription = null, modifier = Modifier.fillMaxSize())
+    }
+}
+
+@Composable
+fun ActiveDrawerWithPalette(paletteImage: ImageBitmap, modifier: Modifier = Modifier) {
+    val orientation = LocalConfiguration.current.orientation
+    var selectedColor by remember { mutableStateOf(Color.Black) }
+
+    val layoutModifier = if (orientation == Configuration.ORIENTATION_LANDSCAPE) {
+        Modifier.fillMaxWidth().height(300.dp)
+    } else {
+        Modifier.fillMaxSize()
+    }
+
+    Column(modifier = modifier.fillMaxSize()) {
+        if (orientation == Configuration.ORIENTATION_PORTRAIT) {
+            Palette(
+                image = paletteImage,
+                modifier = layoutModifier,
+                onSelectedColor = { selectedColor = it }
+            )
+            ActiveDrawer(
+                color = selectedColor,
+                modifier = layoutModifier
+            )
+        } else {
+            Row(modifier = Modifier.fillMaxSize()) {
+                Palette(
+                    image = paletteImage,
+                    modifier = layoutModifier,
+                    onSelectedColor = { selectedColor = it }
+                )
+                ActiveDrawer(
+                    color = selectedColor,
+                    modifier = layoutModifier
+                )
+            }
+        }
+    }
+}
+
+@Preview(showBackground = true, widthDp = 400, heightDp = 600)
+@Composable
+fun ActiveDrawerWithPalettePreview() {
+    // Replace with an actual ImageBitmap for testing
+    val testBitmap = ImageBitmap(100, 100)
+    ActiveDrawerWithPalette(paletteImage = testBitmap)
+}
+
